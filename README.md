@@ -9,7 +9,7 @@ formula. Results appear on a cycling map with an explanation for every rank.
 
 **Live:** <https://cycling-route-three.vercel.app>
 
-![CI](https://github.com/christghuynh/cycling-route/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/christghuynh/ironman-cycle-router/actions/workflows/ci.yml/badge.svg)
 
 <!-- Screenshots: add docs/screenshots/*.png after running the app with a real ORS key. -->
 
@@ -39,7 +39,7 @@ formula. Results appear on a cycling map with an explanation for every rank.
 | --- | --- |
 | Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 (async), asyncpg, httpx |
 | Frontend | React 19, TypeScript, Vite, Leaflet / react-leaflet |
-| Data | OpenRouteService (routing, elevation, geocoding), OpenStreetMap / CyclOSM tiles |
+| Data | OpenRouteService (routing, elevation), Photon (location search), OpenStreetMap / CyclOSM tiles |
 | Database | PostgreSQL 16 |
 | Quality | pytest, respx, ruff, mypy (strict), ESLint, Prettier, Vitest |
 | Delivery | Docker, docker compose, nginx, GitHub Actions |
@@ -69,7 +69,7 @@ formula. Results appear on a cycling map with an explanation for every rank.
 
 ## Local development
 
-**Prerequisites:** Python 3.11+, Node 20+ (CI uses 24), and PostgreSQL. The easiest way to get
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 20+ (CI uses 24), and PostgreSQL. The easiest way to get
 PostgreSQL is `docker compose up db`.
 
 ### Backend
@@ -141,7 +141,8 @@ Full details are in [docs/architecture.md](docs/architecture.md).
 
 ## API
 
-Interactive docs are served at `/docs`.
+Interactive docs are served at `/docs` when running locally or in Docker. (On the Vercel deployment
+only `/api/*` reaches the backend, so `/docs` is not exposed there.)
 
 ### `POST /api/routes`
 
@@ -187,14 +188,31 @@ All errors use the same shape:
 { "error": { "code": "invalid_trip", "message": "The finish is 24.1 km away in a straight line, so the target distance needs to be longer." } }
 ```
 
+## Deployment
+
+The live site runs as one Vercel project with two services defined in `vercel.json`: the Vite
+frontend, and the FastAPI backend as a Python function. Requests to `/api/*` route to the backend
+and everything else to the frontend, so the browser makes same-origin calls and no CORS
+configuration is needed. The database is Neon (serverless Postgres, free tier).
+
+To deploy your own copy:
+
+1. Create a Neon project and copy its **pooled** connection string.
+2. Create the schema once: `cd backend && DATABASE_URL="<neon url>" uv run python -m scripts.init_db`
+3. Import the repository on Vercel, leaving the root directory at the repository root.
+4. Set three environment variables: `ORS_API_KEY`, `DATABASE_URL`, and
+   `CREATE_TABLES_ON_STARTUP=false` (serverless cold starts should do no schema work).
+
+Pushes to `main` redeploy automatically; branches get their own preview URLs.
+
 ## Limitations and next steps
 
 - **Minimal stopping** is not measured yet. The next step is counting traffic signals and stop
   signs along each ride from OpenStreetMap data.
 - **Safety** is a way-type proxy. Real traffic or collision data would make it meaningful.
-- **Quota:** each target-distance search makes up to 8 routing calls, and typing an address makes
-  several geocoding calls. The free ORS plan allows about 40 routing requests per minute, which is
-  roughly 5 searches per minute. The deployed app limits each client to 30 searches and 300
-  autocomplete requests per hour (`ROUTE_REQUESTS_PER_HOUR`, `AUTOCOMPLETE_REQUESTS_PER_HOUR`).
+- **Quota:** a free ORS key allows about 200 routing calls a day, and a target-distance search
+  makes up to 8, so roughly 25 searches a day across all users. Location suggestions come from
+  Photon, which has no quota, with ORS geocoding only as a fallback. The deployed app also limits
+  each client per hour (`ROUTE_REQUESTS_PER_HOUR`, `AUTOCOMPLETE_REQUESTS_PER_HOUR`).
 - **Schema:** tables are created at startup. Add Alembic once the schema needs to change. If you
   ran an earlier version, drop the old database volume (`docker compose down -v`).

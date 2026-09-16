@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cycling}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cycling}
+      POSTGRES_DB: ${POSTGRES_DB:-cycling_routes}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cycling}:${POSTGRES_PASSWORD:-cycling}@db:5432/${POSTGRES_DB:-cycling_routes}
+      ORS_API_KEY: ${ORS_API_KEY:-}
+      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:8080"]'
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
