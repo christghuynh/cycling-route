@@ -1,7 +1,5 @@
-[project]
-name = "cycling-route-planner-backend"
-version = "0.1.0"
-requires-python = ">=3.11"
+# No [project] table on purpose: the app is not packaged, and Vercel's Python runtime installs
+# from requirements.txt when pyproject.toml declares no dependencies.
 
 [tool.ruff]
 line-length = 100

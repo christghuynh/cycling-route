@@ -22,7 +22,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings.database_url)
-        await create_tables(engine)
+        if settings.create_tables_on_startup:
+            await create_tables(engine)
         app.state.session_factory = create_session_factory(engine)
         async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
             app.state.http_client = client
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_origin_regex=settings.cors_origin_regex or None,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )

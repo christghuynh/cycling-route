@@ -15,7 +15,14 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://cycling:cycling@localhost:5432/cycling_routes"
     cors_origins: list[str] = ["http://localhost:5173"]
+    # Optional regex for additional allowed origins, e.g. Vercel preview deployments:
+    # https://.*\.vercel\.app
+    cors_origin_regex: str = ""
     log_level: str = "INFO"
+
+    # Long-lived servers create the schema at startup. Serverless deployments should run
+    # `python -m scripts.init_db` once instead, so cold starts do no schema work.
+    create_tables_on_startup: bool = True
 
     # OpenRouteService provides routing, elevation, geocoding, and autocomplete with one key.
     ors_api_key: str = ""
