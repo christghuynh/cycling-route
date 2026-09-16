@@ -26,7 +26,7 @@ export function PlannerPage() {
       <aside className="sidebar">
         <header className="app-header">
           <h1>
-            <span aria-hidden="true">🚲</span> Cycling Route Planner
+            <span aria-hidden="true">🚲</span> Ironman Cycle Router
           </h1>
           <p>Plan training loops and rides of the distance you want.</p>
         </header>

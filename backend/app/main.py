@@ -31,7 +31,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await engine.dispose()
 
     app = FastAPI(
-        title="Cycling Route Planner API",
+        title="Ironman Cycle Router API",
         version="0.1.0",
         description=(
             "Generates, scores, and ranks cycling routes: loops and target-distance rides for "

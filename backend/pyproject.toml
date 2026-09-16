@@ -1,5 +1,5 @@
 [project]
-name = "cycling-route-planner-backend"
+name = "ironman-cycle-router-backend"
 version = "0.1.0"
 description = "Generates, scores, and ranks cycling routes"
 requires-python = ">=3.12"
