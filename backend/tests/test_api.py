@@ -334,6 +334,63 @@ def test_database_failure_when_saving(
     assert "database is down" not in body["error"]["message"]
 
 
+# --- Rate limiting ----------------------------------------------------------------------------
+
+
+def test_route_generation_is_rate_limited_per_client(
+    settings: Settings, api_mock: respx.MockRouter
+) -> None:
+    settings.route_requests_per_hour = 2
+    api_mock.post(ROAD_DIRECTIONS_URL).mock(side_effect=route_through_waypoints)
+    rider = {"x-forwarded-for": "203.0.113.7"}
+
+    with TestClient(create_app(settings)) as client:
+        for _ in range(2):
+            assert client.post("/api/routes", json=LOOP_REQUEST, headers=rider).status_code == 201
+
+        response = client.post("/api/routes", json=LOOP_REQUEST, headers=rider)
+        assert_error(response, 429, "too_many_requests")
+        assert response.headers["Retry-After"]
+
+        # Another rider is unaffected.
+        other = {"x-forwarded-for": "198.51.100.9"}
+        assert client.post("/api/routes", json=LOOP_REQUEST, headers=other).status_code == 201
+
+
+def test_autocomplete_has_its_own_looser_limit(
+    settings: Settings, api_mock: respx.MockRouter
+) -> None:
+    settings.route_requests_per_hour = 1
+    settings.autocomplete_requests_per_hour = 5
+    api_mock.get(AUTOCOMPLETE_URL).mock(side_effect=geocode_response)
+    api_mock.post(ROAD_DIRECTIONS_URL).mock(side_effect=route_through_waypoints)
+    rider = {"x-forwarded-for": "203.0.113.7"}
+
+    with TestClient(create_app(settings)) as client:
+        client.post("/api/routes", json=LOOP_REQUEST, headers=rider)
+        # Searching is now exhausted, but typing still works.
+        for _ in range(5):
+            response = client.get(
+                "/api/locations/autocomplete", params={"q": "waterloo"}, headers=rider
+            )
+            assert response.status_code == 200
+        assert_error(
+            client.get("/api/locations/autocomplete", params={"q": "waterloo"}, headers=rider),
+            429,
+            "too_many_requests",
+        )
+
+
+def test_rate_limiting_can_be_disabled(settings: Settings, api_mock: respx.MockRouter) -> None:
+    settings.rate_limit_enabled = False
+    settings.route_requests_per_hour = 1
+    api_mock.post(ROAD_DIRECTIONS_URL).mock(side_effect=route_through_waypoints)
+
+    with TestClient(create_app(settings)) as client:
+        for _ in range(3):
+            assert client.post("/api/routes", json=LOOP_REQUEST).status_code == 201
+
+
 # --- Other endpoints --------------------------------------------------------------------------
 
 

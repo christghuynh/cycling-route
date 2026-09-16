@@ -4,13 +4,19 @@ from fastapi import APIRouter, Query
 
 from app.api.dependencies import GeocoderDep
 from app.api.errors import ERROR_RESPONSES
+from app.api.limits import AutocompleteLimit
 from app.domain import Coordinate
 from app.schemas.route import AutocompleteResponse, LocationResponse
 
 router = APIRouter(prefix="/api/locations", tags=["locations"])
 
 
-@router.get("/autocomplete", response_model=AutocompleteResponse, responses=ERROR_RESPONSES)
+@router.get(
+    "/autocomplete",
+    response_model=AutocompleteResponse,
+    responses=ERROR_RESPONSES,
+    dependencies=[AutocompleteLimit],
+)
 async def autocomplete(
     geocoder: GeocoderDep,
     q: Annotated[str, Query(min_length=3, max_length=200)],

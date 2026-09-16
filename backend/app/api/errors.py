@@ -7,29 +7,40 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.core.errors import RoutePlannerError
+from app.core.errors import RoutePlannerError, TooManyRequestsError
 from app.schemas.route import ErrorBody, ErrorResponse
 
 logger = logging.getLogger(__name__)
 
 # OpenAPI documentation for the error shape shared by all endpoints.
 ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
-    code: {"model": ErrorResponse} for code in (404, 422, 502, 503)
+    code: {"model": ErrorResponse} for code in (404, 422, 429, 502, 503)
 }
 
 
 def _error_response(
-    status_code: int, code: str, message: str, details: list[dict[str, object]] | None = None
+    status_code: int,
+    code: str,
+    message: str,
+    details: list[dict[str, object]] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     body = ErrorResponse(error=ErrorBody(code=code, message=message, details=details))
-    return JSONResponse(status_code=status_code, content=body.model_dump(exclude_none=True))
+    return JSONResponse(
+        status_code=status_code, content=body.model_dump(exclude_none=True), headers=headers
+    )
 
 
 async def handle_route_planner_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, RoutePlannerError)
     log = logger.error if exc.status_code >= 500 else logger.info
     log("%s %s -> %s: %s", request.method, request.url.path, exc.code, exc.message)
-    return _error_response(exc.status_code, exc.code, exc.message)
+    headers = (
+        {"Retry-After": str(exc.retry_after_seconds)}
+        if isinstance(exc, TooManyRequestsError)
+        else None
+    )
+    return _error_response(exc.status_code, exc.code, exc.message, headers=headers)
 
 
 async def handle_validation_error(request: Request, exc: Exception) -> JSONResponse:

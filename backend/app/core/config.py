@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     elevation_noise_threshold_m: float = 3.0
     default_cycling_speed_kmh: float = 18.0
 
+    # Per-client rate limits. The ORS key is shared by everyone using a deployment, so public
+    # endpoints cap how much of its quota one client can spend.
+    rate_limit_enabled: bool = True
+    route_requests_per_hour: int = Field(default=30, ge=1)
+    autocomplete_requests_per_hour: int = Field(default=300, ge=1)
+
     # Default preference weights (used when the client omits preferences)
     default_distance_weight: float = 0.5
     default_elevation_weight: float = 0.2

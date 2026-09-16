@@ -46,6 +46,20 @@ class RouteSearch(Base):
     )
 
 
+class RateLimitWindow(Base):
+    """Request count for one client, endpoint, and time window.
+
+    Kept in the database rather than in memory because serverless deployments run many
+    short-lived instances that share no state.
+    """
+
+    __tablename__ = "rate_limit_windows"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class RouteRecord(Base):
     """A generated, scored route belonging to a search."""
 

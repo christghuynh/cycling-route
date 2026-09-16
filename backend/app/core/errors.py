@@ -34,6 +34,17 @@ class RouteNotFoundError(RoutePlannerError):
     code = "route_not_found"
 
 
+class TooManyRequestsError(RoutePlannerError):
+    """The client has made too many requests to an endpoint that costs us upstream quota."""
+
+    status_code = 429
+    code = "too_many_requests"
+
+    def __init__(self, message: str, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class ExternalServiceError(RoutePlannerError):
     """An upstream API failed, timed out, or returned something we could not parse."""
 

@@ -4,6 +4,7 @@ from fastapi import APIRouter, status
 
 from app.api.dependencies import PlannerDep, SessionDep, SettingsDep
 from app.api.errors import ERROR_RESPONSES
+from app.api.limits import RouteGenerationLimit
 from app.core.errors import RouteNotFoundError
 from app.db import repository
 from app.domain import TripRequest
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/api/routes", tags=["routes"])
     response_model=RouteSearchResponse,
     status_code=status.HTTP_201_CREATED,
     responses=ERROR_RESPONSES,
+    dependencies=[RouteGenerationLimit],
 )
 async def create_routes(
     request: RouteRequest, planner: PlannerDep, session: SessionDep, settings: SettingsDep

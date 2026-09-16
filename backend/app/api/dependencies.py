@@ -35,6 +35,18 @@ def get_route_planner(request: Request) -> RoutePlanner:
     )
 
 
+def client_identifier(request: Request) -> str:
+    """Identify the caller for rate limiting.
+
+    Behind Vercel (or any proxy) the socket address is the proxy, so the first entry of
+    X-Forwarded-For is used when present.
+    """
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()[:100]
+    return request.client.host if request.client else "unknown"
+
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings_from_app)]
 PlannerDep = Annotated[RoutePlanner, Depends(get_route_planner)]
