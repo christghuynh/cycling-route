@@ -61,6 +61,13 @@ class RateLimitedError(ExternalServiceError):
     code = "rate_limited"
 
 
+class QuotaExceededError(ExternalServiceError):
+    """An upstream API's quota for our key is used up until it resets (usually daily)."""
+
+    status_code = 503
+    code = "quota_exceeded"
+
+
 class ConfigurationError(RoutePlannerError):
     status_code = 503
     code = "service_not_configured"

@@ -1,6 +1,7 @@
 """Tests for the OpenRouteService clients: request shape and response parsing."""
 
 import json
+import time
 
 import httpx
 import pytest
@@ -11,6 +12,7 @@ from app.core.errors import (
     ExternalServiceError,
     LocationNotFoundError,
     NoRouteFoundError,
+    QuotaExceededError,
     RateLimitedError,
 )
 from app.domain import BikeType, Coordinate
@@ -292,3 +294,90 @@ async def test_geocoder_without_api_key_raises_configuration_error(
 ) -> None:
     with pytest.raises(ConfigurationError):
         await make_geocoder(client, api_key="").autocomplete("Waterloo")
+
+
+# --- Quota exhaustion ---------------------------------------------------------------------------
+
+QUOTA_EXCEEDED = {"error": "Quota exceeded"}
+
+
+@respx.mock
+async def test_exhausted_quota_is_not_reported_as_a_bad_key(client: httpx.AsyncClient) -> None:
+    """ORS answers 403 "Quota exceeded" when a daily quota is spent; the key is still valid."""
+    respx.post(directions_url()).mock(
+        return_value=httpx.Response(
+            403, json=QUOTA_EXCEEDED, headers={"x-ratelimit-reset": str(int(time.time()) + 7200)}
+        )
+    )
+    with pytest.raises(QuotaExceededError) as caught:
+        await make_router(client).get_routes([START, END], BikeType.HYBRID)
+
+    assert "API key" not in caught.value.message
+    assert "quota" in caught.value.message
+    assert "about 2 hours" in caught.value.message
+
+
+@respx.mock
+async def test_a_genuinely_rejected_key_is_still_reported_as_one(
+    client: httpx.AsyncClient,
+) -> None:
+    respx.post(directions_url()).mock(
+        return_value=httpx.Response(403, json={"error": "Access to this API has been disallowed"})
+    )
+    with pytest.raises(ExternalServiceError, match="API key") as caught:
+        await make_router(client).get_routes([START, END], BikeType.HYBRID)
+    assert not isinstance(caught.value, QuotaExceededError)
+
+
+@respx.mock
+async def test_autocomplete_falls_back_to_search_when_its_quota_is_spent(
+    client: httpx.AsyncClient,
+) -> None:
+    respx.get(AUTOCOMPLETE_URL).mock(return_value=httpx.Response(403, json=QUOTA_EXCEEDED))
+    search = respx.get(SEARCH_URL).mock(
+        return_value=httpx.Response(200, json=pelias_response((WATERLOO_LABEL, 43.46, -80.52)))
+    )
+
+    [suggestion] = await make_geocoder(client).autocomplete("waterloo")
+
+    assert suggestion.display_name == WATERLOO_LABEL
+    assert search.called
+
+
+@respx.mock
+async def test_quota_error_surfaces_when_both_geocoding_quotas_are_spent(
+    client: httpx.AsyncClient,
+) -> None:
+    respx.get(AUTOCOMPLETE_URL).mock(return_value=httpx.Response(403, json=QUOTA_EXCEEDED))
+    respx.get(SEARCH_URL).mock(return_value=httpx.Response(403, json=QUOTA_EXCEEDED))
+
+    with pytest.raises(QuotaExceededError, match="resets daily"):
+        await make_geocoder(client).autocomplete("waterloo")
+
+
+@respx.mock
+async def test_search_fallback_orders_results_nearest_to_the_focus(
+    client: httpx.AsyncClient,
+) -> None:
+    """Search weighs focus lightly: live, "waterloo" from Ontario ranked London first."""
+    respx.get(AUTOCOMPLETE_URL).mock(return_value=httpx.Response(403, json=QUOTA_EXCEEDED))
+    respx.get(SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=pelias_response(
+                ("Lambeth, London, England, United Kingdom", 51.4961, -0.1165),
+                ("Waterloo, IA, USA", 42.4926, -92.3540),
+                (WATERLOO_LABEL, 43.4799, -80.5392),
+            ),
+        )
+    )
+
+    suggestions = await make_geocoder(client).autocomplete(
+        "waterloo", focus=Coordinate(43.4643, -80.5204)
+    )
+
+    assert [s.display_name for s in suggestions] == [
+        WATERLOO_LABEL,
+        "Waterloo, IA, USA",
+        "Lambeth, London, England, United Kingdom",
+    ]

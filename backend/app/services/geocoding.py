@@ -15,8 +15,14 @@ from typing import Protocol
 import httpx
 from pydantic import BaseModel
 
-from app.core.errors import ConfigurationError, ExternalServiceError, LocationNotFoundError
+from app.core.errors import (
+    ConfigurationError,
+    ExternalServiceError,
+    LocationNotFoundError,
+    QuotaExceededError,
+)
 from app.domain import Coordinate, Location
+from app.services.geometry import haversine_m
 from app.services.http import parse_response, send_request
 
 logger = logging.getLogger(__name__)
@@ -69,13 +75,32 @@ class OpenRouteServiceGeocoder:
     async def autocomplete(
         self, text: str, focus: Coordinate | None = None, limit: int = 5
     ) -> list[Location]:
-        suggestions = await self._request(AUTOCOMPLETE_PATH, text, focus, limit)
+        try:
+            suggestions = await self._request(AUTOCOMPLETE_PATH, text, focus, limit)
+        except QuotaExceededError:
+            # The two endpoints have separate quotas, so search keeps suggestions working.
+            logger.warning("Autocomplete quota exhausted; falling back to search")
+            return await self._search_nearby(text, focus, limit)
         if suggestions:
             return suggestions
         # Autocomplete draws a blank on addresses whose house number is not mapped; the search
         # endpoint still finds the street.
         logger.info("Autocomplete found nothing for %r; falling back to search", text)
-        return await self._request(SEARCH_PATH, text, focus, limit)
+        return await self._search_nearby(text, focus, limit)
+
+    async def _search_nearby(
+        self, text: str, focus: Coordinate | None, limit: int
+    ) -> list[Location]:
+        """Search, nearest first.
+
+        The search endpoint weighs the focus point far more lightly than autocomplete does, so
+        "waterloo" viewed from Ontario can rank London first. Every result already matches the
+        text, so ordering them by distance from the focus restores the local-first behaviour.
+        """
+        results = await self._request(SEARCH_PATH, text, focus, limit)
+        if focus is None:
+            return results
+        return sorted(results, key=lambda location: haversine_m(focus, location.coordinate))
 
     async def _request(
         self, path: str, text: str, focus: Coordinate | None, limit: int
