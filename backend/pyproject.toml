@@ -1,9 +1,35 @@
-# No [project] table on purpose: the app is not packaged, and Vercel's Python runtime installs
-# from requirements.txt when pyproject.toml declares no dependencies.
+[project]
+name = "cycling-route-planner-backend"
+version = "0.1.0"
+description = "Generates, scores, and ranks cycling routes"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+    "pydantic==2.11.4",
+    "pydantic-settings==2.9.1",
+    "sqlalchemy[asyncio]==2.0.41",
+    "asyncpg==0.30.0",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+    "pytest-asyncio==0.26.0",
+    "aiosqlite==0.21.0",
+    "respx==0.22.0",
+    "ruff==0.11.10",
+    "mypy==1.15.0",
+]
+
+[tool.uv]
+# The app is run from source, not installed as a package, so only dependencies are resolved.
+package = false
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC"]
@@ -17,7 +43,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["app"]
