@@ -29,23 +29,25 @@ def encode_polyline(
     return "".join(output)
 
 
-def photon_place(lat: float, lon: float, **properties: str) -> dict[str, Any]:
-    """One Photon feature. Properties are name/housenumber/street/city/state/country."""
+def pelias_response(*places: tuple[str, float, float]) -> dict[str, Any]:
+    """ORS/Pelias geocoding response for (label, lat, lon) places."""
     return {
-        "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [lon, lat]},
-        "properties": properties,
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {"label": label, "country": "Canada"},
+            }
+            for label, lat, lon in places
+        ],
     }
 
 
-def photon_response(*features: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "FeatureCollection", "features": list(features)}
-
-
-WATERLOO = photon_place(43.4643, -80.5204, name="Waterloo", state="Ontario", country="Canada")
-CAMBRIDGE = photon_place(43.3616, -80.3144, name="Cambridge", state="Ontario", country="Canada")
-WATERLOO_LABEL = "Waterloo, Ontario, Canada"
-CAMBRIDGE_LABEL = "Cambridge, Ontario, Canada"
+WATERLOO_LABEL = "Waterloo, ON, Canada"
+CAMBRIDGE_LABEL = "Cambridge, ON, Canada"
+WATERLOO = (WATERLOO_LABEL, 43.4643, -80.5204)
+CAMBRIDGE = (CAMBRIDGE_LABEL, 43.3616, -80.3144)
 
 
 def ors_route(

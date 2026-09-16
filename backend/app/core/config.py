@@ -17,12 +17,9 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     log_level: str = "INFO"
 
-    # OpenRouteService provides routing and elevation.
+    # OpenRouteService provides routing, elevation, geocoding, and autocomplete with one key.
     ors_api_key: str = ""
     ors_base_url: str = "https://api.openrouteservice.org"
-    # Photon (OpenStreetMap) provides geocoding and autocomplete; no key, and self-hostable.
-    photon_base_url: str = "https://photon.komoot.io"
-    geocoder_user_agent: str = "cycling-route-planner/0.1"
     http_timeout_seconds: float = 20.0
 
     # Target-distance rides: how many directions to try, and how many routing calls may run at

@@ -14,16 +14,14 @@ from app.core.errors import (
     RateLimitedError,
 )
 from app.domain import BikeType, Coordinate
-from app.services.geocoding import PhotonGeocoder
+from app.services.geocoding import OpenRouteServiceGeocoder
 from app.services.routing import OpenRouteServiceRouter
 from tests.factories import (
     DIRECT_ROUTE_POINTS,
-    WATERLOO,
     WATERLOO_LABEL,
     default_ors_response,
     ors_route,
-    photon_place,
-    photon_response,
+    pelias_response,
 )
 
 ORS_BASE = "https://ors.test"
@@ -189,20 +187,20 @@ async def test_ors_without_api_key_raises_configuration_error(client: httpx.Asyn
         await make_router(client, api_key="").get_routes([START, END], BikeType.HYBRID)
 
 
-# --- Photon geocoding -------------------------------------------------------------------------
+# --- Geocoding (ORS / Pelias) -----------------------------------------------------------------
 
-PHOTON_BASE = "https://photon.test"
-PHOTON_URL = f"{PHOTON_BASE}/api"
+AUTOCOMPLETE_URL = f"{ORS_BASE}/geocode/autocomplete"
+SEARCH_URL = f"{ORS_BASE}/geocode/search"
 
 
-def make_geocoder(client: httpx.AsyncClient) -> PhotonGeocoder:
-    return PhotonGeocoder(client, PHOTON_BASE, "test-agent")
+def make_geocoder(client: httpx.AsyncClient, api_key: str = "secret") -> OpenRouteServiceGeocoder:
+    return OpenRouteServiceGeocoder(client, ORS_BASE, api_key)
 
 
 @respx.mock
-async def test_geocode_result_is_parsed(client: httpx.AsyncClient) -> None:
-    route = respx.get(PHOTON_URL).mock(
-        return_value=httpx.Response(200, json=photon_response(WATERLOO))
+async def test_geocode_uses_search_and_parses_result(client: httpx.AsyncClient) -> None:
+    route = respx.get(SEARCH_URL).mock(
+        return_value=httpx.Response(200, json=pelias_response((WATERLOO_LABEL, 43.4643, -80.5204)))
     )
 
     location = await make_geocoder(client).geocode("Waterloo")
@@ -210,96 +208,87 @@ async def test_geocode_result_is_parsed(client: httpx.AsyncClient) -> None:
     assert location.coordinate == Coordinate(43.4643, -80.5204)
     assert location.display_name == WATERLOO_LABEL
     request = route.calls.last.request
-    assert request.headers["User-Agent"] == "test-agent"
-    assert request.url.params["q"] == "Waterloo"
+    assert request.headers["Authorization"] == "secret"
+    assert request.url.params["text"] == "Waterloo"
 
 
 @respx.mock
 async def test_geocode_no_results_raises_location_not_found(client: httpx.AsyncClient) -> None:
-    respx.get(PHOTON_URL).mock(return_value=httpx.Response(200, json=photon_response()))
+    respx.get(SEARCH_URL).mock(return_value=httpx.Response(200, json=pelias_response()))
     with pytest.raises(LocationNotFoundError, match="Atlantis"):
         await make_geocoder(client).geocode("Atlantis")
 
 
 @respx.mock
-async def test_street_addresses_are_labelled_with_house_number(
-    client: httpx.AsyncClient,
-) -> None:
-    payload = photon_response(
-        photon_place(
-            43.4761,
-            -80.5389,
-            name="Tsujiri",
-            housenumber="330",
-            street="Phillip Street",
-            city="Waterloo",
-            state="Ontario",
-            country="Canada",
-        )
-    )
-    respx.get(PHOTON_URL).mock(return_value=httpx.Response(200, json=payload))
-
-    [suggestion] = await make_geocoder(client).autocomplete("Tsujiri")
-
-    assert suggestion.display_name == "Tsujiri, 330 Phillip Street, Waterloo, Ontario, Canada"
-
-
-@respx.mock
-async def test_businesses_at_one_address_collapse_into_a_single_suggestion(
-    client: httpx.AsyncClient,
-) -> None:
-    address = {
-        "housenumber": "330",
-        "street": "Phillip Street",
-        "city": "Waterloo",
-        "state": "Ontario",
-        "country": "Canada",
-    }
-    payload = photon_response(
-        photon_place(43.4761, -80.5389, name="Tsujiri", **address),
-        photon_place(43.4760, -80.5388, name="Popular Pizza", **address),
-        photon_place(43.4762, -80.5389, name="Icon", **address),
-        photon_place(43.4700, -80.5300, name="Waterloo Park", city="Waterloo", state="Ontario"),
-    )
-    respx.get(PHOTON_URL).mock(return_value=httpx.Response(200, json=payload))
-
-    suggestions = await make_geocoder(client).autocomplete("330 phillip street")
-
-    assert [s.display_name for s in suggestions] == [
-        "330 Phillip Street, Waterloo, Ontario, Canada",
-        "Waterloo Park, Waterloo, Ontario",
-    ]
-
-
-@respx.mock
-async def test_autocomplete_passes_focus_and_limits_results(client: httpx.AsyncClient) -> None:
-    places = [
-        photon_place(43.0 + i / 100, -80.0, name=f"Place {i}", city="Waterloo") for i in range(8)
-    ]
-    route = respx.get(PHOTON_URL).mock(
-        return_value=httpx.Response(200, json=photon_response(*places))
+async def test_autocomplete_passes_focus_and_limit(client: httpx.AsyncClient) -> None:
+    places = [(f"Place {i}, Waterloo, ON, Canada", 43.0 + i / 100, -80.0) for i in range(5)]
+    route = respx.get(AUTOCOMPLETE_URL).mock(
+        return_value=httpx.Response(200, json=pelias_response(*places))
     )
 
     suggestions = await make_geocoder(client).autocomplete(
         "Pla", focus=Coordinate(43.46, -80.52), limit=5
     )
 
-    assert [s.display_name for s in suggestions] == [f"Place {i}, Waterloo" for i in range(5)]
+    assert [s.display_name for s in suggestions] == [p[0] for p in places]
     params = route.calls.last.request.url.params
-    assert params["q"] == "Pla"
-    assert params["lat"] == "43.46"
-    assert params["lon"] == "-80.52"
+    assert params["text"] == "Pla"
+    assert params["size"] == "5"
+    assert params["focus.point.lat"] == "43.46"
+    assert params["focus.point.lon"] == "-80.52"
 
 
 @respx.mock
-async def test_geocoder_service_failure(client: httpx.AsyncClient) -> None:
-    respx.get(PHOTON_URL).mock(return_value=httpx.Response(400, text="bad request"))
-    with pytest.raises(ExternalServiceError):
+async def test_autocomplete_falls_back_to_search_when_empty(client: httpx.AsyncClient) -> None:
+    """Addresses whose house number is unmapped return nothing from autocomplete."""
+    autocomplete = respx.get(AUTOCOMPLETE_URL).mock(
+        return_value=httpx.Response(200, json=pelias_response())
+    )
+    search = respx.get(SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200, json=pelias_response(("Randall Drive, Waterloo, ON, Canada", 43.47, -80.53))
+        )
+    )
+
+    [suggestion] = await make_geocoder(client).autocomplete("12 randall drive waterloo")
+
+    assert suggestion.display_name == "Randall Drive, Waterloo, ON, Canada"
+    assert autocomplete.called and search.called
+
+
+@respx.mock
+async def test_autocomplete_does_not_fall_back_when_results_exist(
+    client: httpx.AsyncClient,
+) -> None:
+    respx.get(AUTOCOMPLETE_URL).mock(
+        return_value=httpx.Response(
+            200, json=pelias_response(("330 Phillip Street, Waterloo, ON, Canada", 43.47, -80.53))
+        )
+    )
+    search = respx.get(SEARCH_URL).mock(return_value=httpx.Response(200, json=pelias_response()))
+
+    suggestions = await make_geocoder(client).autocomplete("330 phillip")
+
+    assert len(suggestions) == 1
+    assert not search.called
+
+
+@respx.mock
+async def test_geocoder_rejected_key(client: httpx.AsyncClient) -> None:
+    respx.get(AUTOCOMPLETE_URL).mock(return_value=httpx.Response(401))
+    with pytest.raises(ExternalServiceError, match="API key"):
         await make_geocoder(client).autocomplete("Cambridge")
 
 
 @respx.mock
 async def test_geocoder_network_failure(client: httpx.AsyncClient) -> None:
-    respx.get(PHOTON_URL).mock(side_effect=httpx.ConnectError("boom"))
+    respx.get(AUTOCOMPLETE_URL).mock(side_effect=httpx.ConnectError("boom"))
     with pytest.raises(ExternalServiceError, match="Could not reach"):
         await make_geocoder(client).autocomplete("Cambridge")
+
+
+async def test_geocoder_without_api_key_raises_configuration_error(
+    client: httpx.AsyncClient,
+) -> None:
+    with pytest.raises(ConfigurationError):
+        await make_geocoder(client, api_key="").autocomplete("Waterloo")
