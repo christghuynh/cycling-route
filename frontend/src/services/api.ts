@@ -62,11 +62,31 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   return body as T;
 }
 
+// Geocoding quota is small (about 100 calls a day on a free key) and typing repeats queries -
+// backspacing, retyping, reopening a field - so successful suggestions are remembered.
+const SUGGESTION_CACHE_LIMIT = 100;
+const suggestionCache = new Map<string, Location[]>();
+
+function suggestionKey(query: string, focus: { lat: number; lon: number } | null): string {
+  const normalized = query.trim().toLowerCase().replace(/\s+/g, " ");
+  // Focus only nudges ranking, so nearby map positions (~10 km) share cached results.
+  const area = focus ? `${focus.lat.toFixed(1)},${focus.lon.toFixed(1)}` : "anywhere";
+  return `${normalized}|${area}`;
+}
+
+export function clearSuggestionCache(): void {
+  suggestionCache.clear();
+}
+
 export async function autocompleteLocations(
   query: string,
   focus: { lat: number; lon: number } | null,
   signal?: AbortSignal,
 ): Promise<Location[]> {
+  const key = suggestionKey(query, focus);
+  const cached = suggestionCache.get(key);
+  if (cached) return cached;
+
   const params = new URLSearchParams({ q: query });
   if (focus) {
     params.set("focus_lat", focus.lat.toFixed(5));
@@ -76,6 +96,12 @@ export async function autocompleteLocations(
     method: "GET",
     signal,
   });
+
+  if (suggestionCache.size >= SUGGESTION_CACHE_LIMIT) {
+    const oldest = suggestionCache.keys().next().value;
+    if (oldest !== undefined) suggestionCache.delete(oldest);
+  }
+  suggestionCache.set(key, result.suggestions);
   return result.suggestions;
 }
 

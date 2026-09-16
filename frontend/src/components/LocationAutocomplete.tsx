@@ -14,7 +14,8 @@ interface LocationAutocompleteProps {
 }
 
 const MIN_QUERY_LENGTH = 3;
-const DEBOUNCE_MS = 300;
+// Long enough that a word typed at normal speed is one request, not one per letter.
+const DEBOUNCE_MS = 450;
 
 type LookupState = "idle" | "loading" | "empty" | "error";
 
