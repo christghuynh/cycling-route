@@ -3,9 +3,11 @@ import { RouteList } from "../components/RouteList";
 import { RouteMap } from "../components/RouteMap";
 import { SearchForm } from "../components/SearchForm";
 import { StatusMessage } from "../components/StatusMessage";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { useState } from "react";
 
 import { useRoutePlanner } from "../hooks/useRoutePlanner";
+import { useTheme } from "../hooks/useTheme";
 import { useUserLocation } from "../hooks/useUserLocation";
 import type { Point } from "../hooks/useUserLocation";
 
@@ -15,6 +17,7 @@ export function PlannerPage() {
   const { status, result, error, selectedRouteId, selectedRoute, search, selectRoute } =
     useRoutePlanner();
   const userLocation = useUserLocation();
+  const { theme, toggle: toggleTheme } = useTheme();
   // Location searches are ranked around whatever part of the map is on screen.
   const [mapCenter, setMapCenter] = useState<Point>(DEFAULT_FOCUS);
   const loading = status === "loading";
@@ -25,9 +28,12 @@ export function PlannerPage() {
     <div className="layout">
       <aside className="sidebar">
         <header className="app-header">
-          <h1>
-            <span aria-hidden="true">🚲</span> Ironman Cycle Router
-          </h1>
+          <div className="app-header__row">
+            <h1>
+              <span aria-hidden="true">🚲</span> Ironman Cycle Router
+            </h1>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
           <p>Plan training loops and rides of the distance you want.</p>
         </header>
 
