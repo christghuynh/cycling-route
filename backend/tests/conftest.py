@@ -16,6 +16,7 @@ def settings(tmp_path: Path) -> Settings:
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         ors_api_key="test-key",
         ors_base_url="https://ors.test",
+        photon_base_url="https://photon.test",
     )
 
 

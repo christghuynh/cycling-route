@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.db.database import get_session
-from app.services.geocoding import OpenRouteServiceGeocoder
+from app.services.geocoding import FallbackGeocoder, OpenRouteServiceGeocoder
+from app.services.photon import PhotonGeocoder
 from app.services.route_planner import RoutePlanner
 from app.services.routing import OpenRouteServiceRouter
 
@@ -16,10 +17,14 @@ def get_settings_from_app(request: Request) -> Settings:
     return settings
 
 
-def get_geocoder(request: Request) -> OpenRouteServiceGeocoder:
+def get_geocoder(request: Request) -> FallbackGeocoder:
+    """Photon for suggestions (no quota), OpenRouteService when Photon cannot answer."""
     settings = get_settings_from_app(request)
     client: httpx.AsyncClient = request.app.state.http_client
-    return OpenRouteServiceGeocoder(client, settings.ors_base_url, settings.ors_api_key)
+    return FallbackGeocoder(
+        primary=PhotonGeocoder(client, settings.photon_base_url, settings.geocoder_user_agent),
+        fallback=OpenRouteServiceGeocoder(client, settings.ors_base_url, settings.ors_api_key),
+    )
 
 
 def get_route_planner(request: Request) -> RoutePlanner:
@@ -50,4 +55,4 @@ def client_identifier(request: Request) -> str:
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings_from_app)]
 PlannerDep = Annotated[RoutePlanner, Depends(get_route_planner)]
-GeocoderDep = Annotated[OpenRouteServiceGeocoder, Depends(get_geocoder)]
+GeocoderDep = Annotated[FallbackGeocoder, Depends(get_geocoder)]

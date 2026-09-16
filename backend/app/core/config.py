@@ -24,13 +24,17 @@ class Settings(BaseSettings):
     # `python -m scripts.init_db` once instead, so cold starts do no schema work.
     create_tables_on_startup: bool = True
 
-    # OpenRouteService provides routing, elevation, geocoding, and autocomplete with one key.
+    # OpenRouteService provides routing and elevation, and is the geocoding fallback.
     ors_api_key: str = ""
     ors_base_url: str = "https://api.openrouteservice.org"
+    # Photon provides type-ahead suggestions without spending ORS quota. No key; self-hostable.
+    photon_base_url: str = "https://photon.komoot.io"
+    geocoder_user_agent: str = "ironman-cycle-router/0.1"
     http_timeout_seconds: float = 20.0
 
     # Target-distance rides: how many directions to try, and how many routing calls may run at
-    # once for a single request (the free ORS plan allows ~40 directions requests per minute).
+    # once for a single request. A free ORS key allows about 200 directions calls a day, and each
+    # direction can take two attempts, so a search costs up to twice this count.
     target_candidate_count: int = Field(default=4, ge=1, le=8)
     max_concurrent_routing_requests: int = Field(default=4, ge=1)
 

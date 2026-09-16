@@ -13,12 +13,13 @@ from app.domain import Coordinate
 from app.main import create_app
 from app.services.geometry import path_length_m
 from tests.factories import (
-    CAMBRIDGE,
-    WATERLOO,
-    WATERLOO_LABEL,
+    PHOTON_WATERLOO,
+    PHOTON_WATERLOO_LABEL,
     default_ors_response,
     ors_route,
     pelias_response,
+    photon_place,
+    photon_response,
 )
 
 ORS = "https://ors.test"
@@ -26,6 +27,7 @@ DIRECTIONS_URL = f"{ORS}/v2/directions/cycling-regular/json"
 ROAD_DIRECTIONS_URL = f"{ORS}/v2/directions/cycling-road/json"
 AUTOCOMPLETE_URL = f"{ORS}/geocode/autocomplete"
 SEARCH_URL = f"{ORS}/geocode/search"
+PHOTON_URL = "https://photon.test/api"
 
 HOME = {"label": "Waterloo, ON, Canada", "lat": 43.4643, "lon": -80.5204}
 PARK = {"label": "Waterloo Park, ON, Canada", "lat": 43.4666, "lon": -80.5288}
@@ -39,13 +41,19 @@ POINT_TO_POINT_REQUEST = {
 LOOP_REQUEST = {"mode": "loop", "start": HOME, "target_distance_km": 30, "bike_type": "road"}
 
 
-def geocode_response(request: httpx.Request) -> httpx.Response:
-    text = request.url.params["text"].lower()
-    if "waterloo" in text:
-        return httpx.Response(200, json=pelias_response(WATERLOO))
-    if "cambridge" in text:
-        return httpx.Response(200, json=pelias_response(CAMBRIDGE))
-    return httpx.Response(200, json=pelias_response())
+PHOTON_CAMBRIDGE = photon_place(
+    43.3616, -80.3144, name="Cambridge", state="Ontario", country="Canada"
+)
+
+
+def photon_geocode(request: httpx.Request) -> httpx.Response:
+    """Fake Photon: knows Waterloo and Cambridge, nothing else."""
+    query = request.url.params["q"].lower()
+    if "waterloo" in query:
+        return httpx.Response(200, json=photon_response(PHOTON_WATERLOO))
+    if "cambridge" in query:
+        return httpx.Response(200, json=photon_response(PHOTON_CAMBRIDGE))
+    return httpx.Response(200, json=photon_response())
 
 
 def route_through_waypoints(request: httpx.Request) -> httpx.Response:
@@ -58,7 +66,9 @@ def route_through_waypoints(request: httpx.Request) -> httpx.Response:
 
 
 def mock_point_to_point(api_mock: respx.MockRouter, ors: httpx.Response | None = None) -> None:
-    api_mock.get(SEARCH_URL).mock(side_effect=geocode_response)
+    api_mock.get(PHOTON_URL).mock(side_effect=photon_geocode)
+    # ORS geocoding is only the fallback; it knows nothing Photon doesn't.
+    api_mock.get(SEARCH_URL).mock(return_value=httpx.Response(200, json=pelias_response()))
     api_mock.post(DIRECTIONS_URL).mock(
         return_value=ors or httpx.Response(200, json=default_ors_response())
     )
@@ -161,7 +171,7 @@ def test_point_to_point_geocodes_text_and_ranks_routes(
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["start"]["display_name"] == WATERLOO_LABEL
+    assert body["start"]["display_name"] == PHOTON_WATERLOO_LABEL
     assert body["target_distance_km"] is None
     routes = body["routes"]
     assert [route["rank"] for route in routes] == [1, 2]
@@ -198,12 +208,20 @@ def test_preferences_are_normalised(client: TestClient, api_mock: respx.MockRout
 # --- Autocomplete -----------------------------------------------------------------------------
 
 
-def test_autocomplete_returns_suggestions(client: TestClient, api_mock: respx.MockRouter) -> None:
-    route = api_mock.get(AUTOCOMPLETE_URL).mock(
+def test_autocomplete_suggestions_come_from_photon(
+    client: TestClient, api_mock: respx.MockRouter
+) -> None:
+    photon = api_mock.get(PHOTON_URL).mock(
         return_value=httpx.Response(
             200,
-            json=pelias_response(WATERLOO, ("Waterloo, IA, USA", 42.4928, -92.3426)),
+            json=photon_response(
+                PHOTON_WATERLOO,
+                photon_place(42.4928, -92.3426, name="Waterloo", state="Iowa", country="USA"),
+            ),
         )
+    )
+    ors = api_mock.get(AUTOCOMPLETE_URL).mock(
+        return_value=httpx.Response(200, json=pelias_response())
     )
 
     response = client.get(
@@ -212,10 +230,27 @@ def test_autocomplete_returns_suggestions(client: TestClient, api_mock: respx.Mo
 
     assert response.status_code == 200
     assert [s["display_name"] for s in response.json()["suggestions"]] == [
-        WATERLOO_LABEL,
-        "Waterloo, IA, USA",
+        PHOTON_WATERLOO_LABEL,
+        "Waterloo, Iowa, USA",
     ]
-    assert route.calls.last.request.url.params["focus.point.lat"] == "43.4"
+    assert photon.calls.last.request.url.params["lat"] == "43.4"
+    assert not ors.called, "Typing must not spend OpenRouteService quota"
+
+
+def test_autocomplete_falls_back_to_ors_when_photon_is_down(
+    client: TestClient, api_mock: respx.MockRouter
+) -> None:
+    api_mock.get(PHOTON_URL).mock(side_effect=httpx.ConnectError("photon unreachable"))
+    api_mock.get(AUTOCOMPLETE_URL).mock(
+        return_value=httpx.Response(
+            200, json=pelias_response(("Waterloo, ON, Canada", 43.48, -80.54))
+        )
+    )
+
+    response = client.get("/api/locations/autocomplete", params={"q": "waterloo"})
+
+    assert response.status_code == 200
+    assert [s["display_name"] for s in response.json()["suggestions"]] == ["Waterloo, ON, Canada"]
 
 
 def test_autocomplete_requires_three_characters(
@@ -274,6 +309,7 @@ def test_unknown_location(client: TestClient, api_mock: respx.MockRouter) -> Non
 
 
 def test_geocoding_service_failure(client: TestClient, api_mock: respx.MockRouter) -> None:
+    api_mock.get(PHOTON_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
     api_mock.get(SEARCH_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
     response = client.post("/api/routes", json=POINT_TO_POINT_REQUEST)
     assert_error(response, 502, "external_service_error")
@@ -362,7 +398,7 @@ def test_autocomplete_has_its_own_looser_limit(
 ) -> None:
     settings.route_requests_per_hour = 1
     settings.autocomplete_requests_per_hour = 5
-    api_mock.get(AUTOCOMPLETE_URL).mock(side_effect=geocode_response)
+    api_mock.get(PHOTON_URL).mock(side_effect=photon_geocode)
     api_mock.post(ROAD_DIRECTIONS_URL).mock(side_effect=route_through_waypoints)
     rider = {"x-forwarded-for": "203.0.113.7"}
 

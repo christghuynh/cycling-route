@@ -114,3 +114,22 @@ def make_metrics(
         safety_score=safety_score,
         repeated_share=repeated_share,
     )
+
+
+def photon_place(lat: float, lon: float, **properties: str) -> dict[str, Any]:
+    """One Photon feature. Properties are name/housenumber/street/city/state/country."""
+    return {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [lon, lat]},
+        "properties": properties,
+    }
+
+
+def photon_response(*features: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "FeatureCollection", "features": list(features)}
+
+
+PHOTON_WATERLOO = photon_place(
+    43.4643, -80.5204, name="Waterloo", state="Ontario", country="Canada"
+)
+PHOTON_WATERLOO_LABEL = "Waterloo, Ontario, Canada"

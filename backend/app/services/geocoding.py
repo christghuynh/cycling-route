@@ -1,5 +1,8 @@
 """Geocoding: turn place names into coordinates, including type-ahead suggestions.
 
+Suggestions come from Photon first (see `photon.py`), with OpenRouteService as the fallback when
+Photon cannot answer; `FallbackGeocoder` below composes the two.
+
 OpenRouteService hosts a Pelias geocoder, so the same key used for routing covers geocoding.
 Two endpoints are used: `/geocode/autocomplete` is built for type-ahead and handles partial
 input, but returns nothing when an exact house number is not in the data. `/geocode/search` is
@@ -139,3 +142,32 @@ class OpenRouteServiceGeocoder:
             )
             for feature in features
         ][:limit]
+
+
+class FallbackGeocoder:
+    """Use a primary geocoder, and a fallback only when the primary cannot answer.
+
+    Suggestions fall back only on a service failure, not on an empty result: typos and gibberish
+    would otherwise quietly spend the fallback's quota. A full lookup (free text submitted without
+    picking a suggestion) is rare enough to also try the fallback when nothing was found.
+    """
+
+    def __init__(self, primary: Geocoder, fallback: Geocoder) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def geocode(self, query: str) -> Location:
+        try:
+            return await self._primary.geocode(query)
+        except (ExternalServiceError, LocationNotFoundError) as exc:
+            logger.info("Primary geocoder could not resolve %r (%s); trying fallback", query, exc)
+            return await self._fallback.geocode(query)
+
+    async def autocomplete(
+        self, text: str, focus: Coordinate | None = None, limit: int = 5
+    ) -> list[Location]:
+        try:
+            return await self._primary.autocomplete(text, focus, limit)
+        except ExternalServiceError as exc:
+            logger.warning("Primary geocoder failed (%s); using fallback for suggestions", exc)
+            return await self._fallback.autocomplete(text, focus, limit)
